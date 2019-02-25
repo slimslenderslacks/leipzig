@@ -2,9 +2,9 @@
   (:require [overtone.live :refer :all]
             [leipzig.melody :refer :all]
             [leipzig.scale :as scale]
-            [leipzig.temperament :as temperament]
             [leipzig.live :as live]
-            [leipzig.chord :as chord]))
+            [leipzig.chord :as chord]
+            [leipzig.temperament :as temperament]))
 
 (definst kick [freq 110]
          (-> (line:kr freq (* freq 1/2) 0.5)
@@ -13,10 +13,10 @@
              (* (env-gen (perc 0.01 0.3) :action FREE))
              (* 2/3)))
 
-(definst bass [freq 110]
+(definst bass [freq 110 fuzz 1]
          (-> freq
              saw
-             (rlpf (line:kr freq (* freq 2) 1))
+             (rlpf (line:kr (* freq fuzz) (* freq fuzz 2) 1))
              (* (env-gen (perc 0.1 0.4) :action FREE))))
 
 (definst organ [freq 440 dur 1]
@@ -25,11 +25,11 @@
              (rlpf (mul-add (sin-osc 3) 300 (* freq 4)))
              (rlpf (mul-add (sin-osc 2) 400 (* freq 3)))
              (rlpf (mul-add (sin-osc 2) 200 (* freq 5)))
-             (* (env-gen (adsr) (line:kr 1 0 dur) :action FREE))
+             (* (square 1))
              (* (env-gen (adsr 0.01 0.2 0.6) (line:kr 1 0 dur) :action FREE))
              (* 1/10)))
 
-(defmethod live/play-note :default [{hertz :pitch}] (bass hertz))
+(defmethod live/play-note :default [{hertz :pitch ceiling :fuzz}] (bass hertz (or ceiling 1)))
 (defmethod live/play-note :beat [{hertz :pitch}] (kick hertz))
 (defmethod live/play-note :accompaniment [{hertz :pitch seconds :duration}] (organ hertz seconds))
 
@@ -42,32 +42,62 @@
 
 (def beat
   (->>
-   (phrase (cycle [1/2 1/4 1/4 1/2 1/2]) (repeat -14))
+   (phrase (cycle [1/2 1/4 1/4 1/2 1/2]) (cycle [-14 -14 -7 -14 -7]))
    (take 20)
    (times 6)
    (where :part (is :beat))))
 
 (defn accompaniment [root]
-  (->> (phrase (repeat 8) [(-> chord/triad (chord/root root))])
+  (->> (phrase (repeat 8 1) (-> chord/seventh (chord/root root) vals cycle))
        (where :part (is :accompaniment))))
 
 (def track
-  (->> (mapthen bassline progression)
-       #_(with (mapthen accompaniment progression))
-       #_(with beat)
-       (where :pitch (comp temperament/equal scale/A scale/minor))
-       (where :time (bpm 90))
-       (where :duration (bpm 90))))
-
-(live/play beat)
-(live/stop)
+  (->>
+   ;beat
+   (mapthen bassline progression)
+   (with (mapthen accompaniment progression))
+   (with beat)
+   (where :pitch (comp temperament/equal scale/A scale/minor))
+   (where :time (bpm 90))
+   (where :duration (bpm 90))))
 
 (comment
- (println track)
- (organ)
- (kick)
- (bass)
- (organ)
- (live/play track)
  (live/jam #'track)
- (live/stop))
+ (live/stop)
+ (kick))
+
+(def full-track
+  "A post-facto rendering of the track."
+  (->>
+   (->> beat (where :pitch (is -14)) (take-while #(-> % :time (<= 6))))
+
+   (then (after 3/2
+                (with beat
+                      (mapthen bassline progression))))
+
+   (then (with beat
+               (mapthen bassline progression)
+               (mapthen accompaniment progression)))
+
+   (then (with beat
+               (->>
+                (mapthen bassline progression)
+                (where :fuzz (is 5)))))
+
+   (then (with beat
+               (->>
+                (mapthen bassline progression)
+                (where :fuzz (is 5)))
+               (mapthen accompaniment progression)))
+
+   (then (with beat
+               (mapthen bassline progression)))
+
+   (where :pitch (comp temperament/equal scale/A scale/minor))
+   (where :time (bpm 90))
+   (where :duration (bpm 90))))
+
+(comment
+ (live/play full-track)
+ (live/stop)
+ )
